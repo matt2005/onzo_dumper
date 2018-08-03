@@ -1,0 +1,278 @@
+
+import struct
+import logging
+log = logging.getLogger(__name__)
+def unpack_from(format, data, offset):
+	s = struct.calcsize(format)
+	return struct.unpack(format, data[offset:offset + s])
+
+class DataFormat(object):
+	__doc__ = '\n    DataFormat objects contain the information needed about how to read and\n    interpret the data contained in a data stream.\n    '
+	def __init__(self, type, size, CURRENT, OFFSET, START, **kw):
+		self.type = type
+		self.size = size
+		self.CURRENT = CURRENT
+		self.OFFSET = OFFSET
+		self.START = START
+		for kw in kwargs.iteritems():
+			setattr(self, kw, value)
+		self.ffff_values = 0
+
+	def decode(self, raw_data, block_index=None, **count):
+		#[NODE: 0]
+		count = (len(raw_data) - self.header_size) / self.sample_size
+
+		#[NODE: 46]
+		for i in xrange(count):
+
+		#[NODE: 88]
+		del _[1]
+		for loSamples in xrange(count):
+		if len(raw_data) >= self.header_size:
+			pass
+		else:
+			log.debug('Block %i has no data!' % (block_index))
+			return []
+		if self.ffff_values:
+			self.ffff_values
+			log.debug('0xFFFF data spotted in %i samples' % self.ffff_values)
+		else:
+			self.ffff_values
+		return samples
+
+
+	def _decode(self, headers, loSamples, **kwargs):
+		raise NotImplemented
+
+	def fix_cur_registers(self, start_block, cur_block, cur_offset):
+		if start_block > self.size:
+			log.error('stream#%s: start_block fixed %i -> 0x0' % (self.type, start_block))
+			start_block = 0
+		if cur_offset > 256:
+			log.error('stream#%s: cur_offset fixed %i -> 0x0' % (self.type, cur_offset))
+			cur_offset = 256
+		if cur_block >= self.size:
+			log.error('stream#%s: cur_block fixed %i -> 0x0' % (self.type, cur_block))
+			cur_block = 0
+		return (start_block, cur_block, cur_offset)
+
+
+
+class RealPower_091002(DataFormat):
+	__doc__ = '\n    Real power data format as of 2009-10-02.\n    '
+	header_size = 8
+	sample_size = 4
+	sample_format = '<HH'
+	header_format = '<II'
+	header_fields = ['timestamp', 'ear']
+	flip_threshold = 30000
+	def _decode(self, headers, loSamples, block_index=None, last_timestamp=None, last_value=None):
+		timestamp = headers['timestamp']
+		if timestamp == 4294967295L:
+			if last_timestamp is None:
+				log.error('Bug #???: Block %i has no valid headers. Ignoring.' % (block_index))
+				return []
+			log.error('Bug #167: Block %i has broken headers' % (block_index))
+			timestamp = last_timestamp
+		hiTime = timestamp >> 16
+		prev_loTime = timestamp & 65535
+		prev_timestamp = timestamp
+		samples = []
+		for index in enumerate(loSamples):
+			if curr_loTime == 65535 and curr_value in (-1, 65535):
+				self.ffff_values += 1
+				continue
+			else:
+				if abs(curr_value) > 28672:
+					log.debug('Sample %r[%r]: bad data (%i,%i)' % (block_index, index, curr_loTime, curr_value))
+					continue
+		if curr_loTime < prev_loTime:
+			hiTime += 1
+		curr_timestamp = (hiTime << 16) + curr_loTime
+		if prev_timestamp and abs(curr_timestamp - prev_timestamp) > self.flip_threshold:
+			log.debug('Sample %r[%r]: too long interval %i -> %i,%i' % (block_index, index, prev_timestamp, curr_timestamp, curr_value))
+		else:
+			prev_timestamp
+		samples.append((curr_timestamp, curr_value))
+		prev_timestamp = curr_timestamp
+		prev_loTime = curr_loTime
+		return samples
+
+
+
+class ReactivePower_091002(RealPower_091002):
+	__doc__ = '\n    The only difference is the signed value field.\n    '
+	sample_format = '<Hh'
+
+
+class Energy_091002(DataFormat):
+	__doc__ = '\n    Energy data format as of 2009-10-02.\n\n    Proper decoding requires three extra parameters, supplied to __init__:\n        interval - spacing between data points, in seconds\n        offset - the clamp-relative time of the first data point, in seconds\n        multiplier - necessary to convert the values to units of 256 * J\n    '
+	header_size = 8
+	sample_size = 2
+	sample_format = '<H'
+	header_format = '<II'
+	header_fields = ['timestamp', 'ear']
+	def _decode(self, headers, loSamples, block_index=None, last_timestamp=None, last_value=None):
+		shift = 16
+		i = self.multiplier
+		while i > 1:
+			shift += 1
+			i /= 2
+		timestamp = headers['timestamp']
+		if timestamp == 4294967295L:
+			if last_timestamp is None:
+				log.error('Bug #???: Block %r has no valid headers. Ignoring.' % block_index)
+				return []
+			log.debug('Bug #167: Block %r has broken timestamp' % block_index)
+			timestamp = last_timestamp + self.interval
+		if (timestamp - self.offset) % self.interval != 0:
+			timestamp = (timestamp - self.offset + self.interval / 2) // self.interval * self.interval + self.offset
+		hiValue = headers['ear'] >> shift
+		prev_loValue = 0
+		if hiValue == 65535:
+			if last_timestamp is None:
+				log.error('Bug #???: Block %r has no valid headers. Ignoring.' % block_index)
+				return []
+			log.debug('Bug #167: Block %r has broken EAR' % block_index)
+			hiValue = last_value >> shift
+			prev_loValue = last_value & 65535
+		samples = []
+		prev_value = None
+		for index in enumerate(loSamples):
+			passif curr_loValue == 65535:
+			self.ffff_values += 1
+			curr_value = prev_value
+		else:
+			if curr_loValue < prev_loValue:
+				hiValue += 1
+			curr_value = (hiValue << shift) + curr_loValue * self.multiplier
+			prev_value = curr_value
+			prev_loValue = curr_loValue
+		if curr_value is not None:
+			samples.append((timestamp, curr_value))
+		timestamp += self.interval
+		return samples
+
+
+
+class RealPower_1_01(DataFormat):
+	__doc__ = '\n    MM 2009-02-13 Totally broken format from current hardware\n    quirks like data in big endian, ususable header\n\n    >>> dd = decode(PowerStream.REAL_STANDARD, 1.01, \'\')\n    >>> block = struct.pack("<HHBBH", 0xFFFF, 0xFFFF, 0, 0, 0) +                         \'\'.join([struct.pack(\'>HH\', t, v) for t,v in             [(1, 1), (0xFFFF, 2), (0xF001, 0xFFFF), (2, 3), (1, 4), (0x7000, 5),  (0xE000, 6), (1, 7)]])\n    >>> dd = decode(PowerStream.REAL_STANDARD, 1.01, block)\n    >>> list(dd)\n    [(1, 1), (2, 3), (65537, 4), (94208, 5), (122880, 6), (131073, 7)]\n    '
+	_version_number = 1.01
+	_version_name = 'Real power data format as for 2009-02-13'
+	header_size = 8
+	sample_size = 4
+	sample_format = '>HH'
+	header_format = '<HHBBH'
+	header_fields = ['hiStart', 'hiEnd', 'status', 'entries', 'reserved']
+	flip_threshold = 30000
+	def fix_cur_registers(self, start_block, cur_block, cur_offset):
+		start_block = DataFormat.fix_cur_registers(self, start_block, cur_block, cur_offset)
+		if start_block == 65535 or start_block % self.size != 0:
+			log.error('stream#%s: start_block fixed %i -> 0x0' % (self.type, start_block))
+			start_block = 0
+		return (start_block, cur_block, cur_offset)
+
+	def _decode(self, headers, loSamples, block_index=None, last_timestamp=None, last_value=None):
+		hiTime = headers['hiStart']
+		if hiTime == 65535:
+			if not last_timestamp:
+				last_timestamp
+			hiTime = last_timestamp >> 16
+		samples = []
+		prev_loTime = 0
+		prev_timestamp = None
+		for index in enumerate(loSamples):
+			if curr_loTime == 65535 or curr_value in (-1, 65535):
+				self.ffff_values += 1
+				continue
+			else:
+				if abs(curr_value) > 28672:
+					log.debug('Sample %r[%r]: bad data (%i,%i)' % (block_index, index, curr_loTime, curr_value))
+					continue
+		if curr_loTime < prev_loTime:
+			hiTime += 1
+		curr_timestamp = (hiTime << 16) + curr_loTime
+		prev_loTime = curr_loTime
+		if prev_timestamp and abs(curr_timestamp - prev_timestamp) > self.flip_threshold:
+			log.debug('Sample %r[%r]: too long interval %i -> %i,%i' % (block_index, index, prev_timestamp, curr_timestamp, curr_value))
+		else:
+			prev_timestamp
+		samples.append((curr_timestamp, curr_value))
+		prev_timestamp = curr_timestamp
+		if headers['hiEnd'] not in [None, 65535, hiTime]:
+			log.debug('Block %r hiEnd missed. should be 0x%04x, is 0x%04x' % (block_index, headers['hiEnd'], hiTime))
+		return samples
+
+
+
+class ReactivePower_1_01(RealPower_1_01):
+	__doc__ = '\n    The only difference is the signed value field.\n    '
+	_version_number = 1.01
+	_version_name = 'Reactive power data format as for 2009-02-13'
+	sample_format = '>Hh'
+
+
+class Energy_1(DataFormat):
+	__doc__ = '\n    Based on historical.py, ignoring header though.\n\n    >>> ff = Energy_1_069(None, None, None, None, None,\n    ...    interval=2048)\n    >>> b_1_02 = struct.pack("<IHHBBH HHHHHH", 101, 0, 2, 0, 6, 600,\n    ...                                        0, 1, 2, 1, 2, 1)\n    >>> bb = ff.decode(b_1_02)\n    >>> list( bb )\n    [(101L, 0), (2149L, 1), (4197L, 2), (6245L, 65537), (8293L, 65538), (10341L, 131073)]\n    '
+	_version_number = 1.069
+	_version_name = 'Totally broken format from current hardware 2009-02-13'
+	header_size = 12
+	sample_size = 2
+	sample_format = '<H'
+	header_format = '<IHHBBH'
+	header_fields = ['timestamp', 'hiStart', 'hiEnd', 'status', 'entries', 'interval']
+	def fix_cur_registers(self, start_block, cur_block, cur_offset):
+		start_block = DataFormat.fix_cur_registers(self, start_block, cur_block, cur_offset)
+		if start_block == 65535 or start_block % self.size != 0:
+			log.error('stream#%s: start_block fixed %i -> 0x0' % (self.type, start_block))
+			start_block = 0
+		return (start_block, cur_block, cur_offset)
+
+	def _decode(self, headers, loSamples, block_index=None, last_timestamp=None, last_value=None):
+		timestamp = block_index * (256 - self.header_size) / self.sample_size * self.interval + self.offset
+		prev_value = None
+		prev_loValue = 0
+		hiValue = headers['hiStart']
+		if hiValue == 65535:
+			log.debug('Bug #167: Block %r has broken EAR' % block_index)
+			if last_value is not None:
+				prev_value = last_value
+				hiValue = last_value >> 16
+				prev_loValue = last_value & 65535
+			else:
+				if block_index == 0:
+					log.debug('Bug #167: Broken headers in first block')
+					hiValue = 0
+				else:
+					self.ffff_values = len(loSamples)
+					return []
+		samples = []
+		for index in enumerate(loSamples):
+			passif curr_loValue == 65535:
+			self.ffff_values += 1
+			curr_value = prev_value
+		else:
+			if index == len(loSamples) - 1 and curr_loValue & 255 == 0:
+				log.debug('Sample %r: bad data (%i)' % (index, curr_loValue))
+			else:
+				if curr_loValue < prev_loValue:
+					hiValue += 1
+				curr_value = (hiValue << 16) + curr_loValue
+				prev_value = curr_value
+				prev_loValue = curr_loValue
+		if curr_value is not None:
+			samples.append((timestamp, curr_value))
+		timestamp += self.interval
+		if headers['hiEnd'] not in [None, 65535, hiValue]:
+			log.debug('hiEnd missed. should be 0x%04x, is 0x%04x' % (headers['hiEnd'], hiValue))
+		return samples
+
+
+
+class Energy_1_069(Energy_1):
+	__doc__ = '\n    MM 2009-02-13 Totally broken format from current hardware\n    quirks like data in big endian, ususable header\n\n    >>> dd = decode(EnergyStream.LOW_RES, 1.069, \'\')\n    >>> dd.startTime() is None\n    True\n\n    >>> b_1_02 = struct.pack("<IHHBBH", 101, 0, 2, 0, 6, 600) +                 struct.pack(">HHHHHH", 0, 1, 2, 1, 2, 1)\n    >>> bb = decode(EnergyStream.LOW_RES, 1.069, b_1_02)\n    >>> list( bb.samples(-1, 0) )\n    [0, 1, 2, 65537, 65538, 131073]\n    >>> list( bb.samples(4, 2) )\n    [65537]\n    '
+	_version_number = 1.069
+	_version_name = 'Totally broken format from current hardware 2009-02-13'
+	sample_format = '>H'
+
+

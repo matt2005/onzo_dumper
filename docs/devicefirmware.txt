@@ -1,0 +1,72 @@
+import sys
+import os
+import time
+import random
+import optparse
+import traceback
+import logging
+log = logging.getLogger('df')
+import usbprotocol
+from client import device
+pr = usbprotocol.pack_reqest
+
+def get_register(d, network_id, register_id):
+    trans_id = random.getrandbits(16)
+    request = pr(trans_id, network_id, usbprotocol.REQUEST_GET_REGISTER, register_id, [])
+    d.message_send(request)
+    response = d.message_recv()
+    (r_trans_id, _, got_type, _, params,) = usbprotocol.unpack_response(response)
+    if ((r_trans_id != trans_id) and log.error(('transactions id differ %r %r' % (r_trans_id,
+     trans_id)))):
+        pass
+    return params[0]
+
+
+
+def set_register(d, network_id, register_id, value):
+    trans_id = random.getrandbits(16)
+    request = pr(trans_id, network_id, usbprotocol.REQUEST_SET_REGISTER, register_id, [value])
+    d.message_send(request)
+    response = d.message_recv()
+    (r_trans_id, _, got_type, _, params,) = usbprotocol.unpack_response(response)
+    if ((r_trans_id != trans_id) and log.error(('transactions id differ %r %r' % (r_trans_id,
+     trans_id)))):
+        pass
+    return params[0]
+
+
+
+def get_block_request(d, network_id, data_type, block_number):
+    trans_id = random.getrandbits(16)
+    request = pr(trans_id, network_id, usbprotocol.REQUEST_GET_BULK_DATA, data_type, [block_number,
+     1])
+    d.message_send(request)
+    response = d.message_recv()
+    (r_trans_id, _, got_type, _, params,) = usbprotocol.unpack_response(response)
+    if ((r_trans_id != trans_id) and log.error(('transactions id differ %r %r' % (r_trans_id,
+     trans_id)))):
+        pass
+    return (params[0],
+     params[1])
+
+
+
+def reboot_request(d, network_id):
+    trans_id = random.getrandbits(16)
+    request = pr(trans_id, network_id, usbprotocol.REQUEST_CMD_RESET, 0, [])
+    d.message_send(request)
+
+
+
+def wait_for_device_connect(d):
+    while True:
+        try:
+            d.connect()
+        except Exception:
+            time.sleep(2.0)
+        else:
+            break
+
+
+
+
